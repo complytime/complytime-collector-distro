@@ -13,7 +13,7 @@ Most scanning providers are API-based (Kubernetes, cloud, GitHub). They need out
 **Goals:**
 
 - Structural least-privilege: Wasm plugins cannot access host filesystem, exec subprocesses, or open raw sockets — by construction, not policy
-- Single-artifact distribution: one `complyctl get` fetches content and plugin together
+- Single-command distribution: one `complyctl get` fetches a complypack (plugin + PaC content + manifest) as a self-contained OCI artifact, distinct from the Gemara content stream
 - Platform-neutral plugins: Wasm modules run on any OS/arch without recompilation
 - Coexistence: native (go-plugin/gRPC) and Wasm (wazero) plugins in the same scan workflow
 - Familiar authoring: plugin authors write Go, implement the same Describe/Generate/Scan interface
@@ -67,20 +67,40 @@ Most scanning providers are API-based (Kubernetes, cloud, GitHub). They need out
 
 **Rationale**: TinyGo's `encoding/json` works (since 0.30+). JSON is human-debuggable. Plugin payloads are small (assessment configs, variable maps). Serialization overhead is negligible compared to HTTP round-trips in Scan.
 
-### D4: OCI multi-layer complypack artifact
+### D4: Two-stream OCI model — Gemara content and complypacks
 
-**Choice**: Complypack is a standard OCI manifest with Gemara YAML layers plus a Wasm plugin layer. The OCI config blob carries plugin metadata (evaluator_id, capabilities, version).
+**Choice**: Two distinct OCI artifact streams reflecting the authorship boundary:
 
-| Layer | Media Type |
-|:---|:---|
-| Catalog | `application/vnd.gemara.catalog.v1+yaml` |
-| Guidance | `application/vnd.gemara.guidance.v1+yaml` |
-| Policy | `application/vnd.gemara.policy.v1+yaml` |
-| Plugin | `application/vnd.complypack.plugin.v1+wasm` |
+| Stream | Author | Contains | Config Media Type |
+|:---|:---|:---|:---|
+| Gemara content | Compliance / GRC team | Catalog, guidance, policy YAML layers | `application/vnd.oci.empty.v1+json` (existing) |
+| ComplyPack | Engineering team | Wasm plugin + PaC assessment content + manifest | `application/vnd.complypack.config.v1+json` |
 
-Config: `application/vnd.complypack.config.v1+json`
+A complypack is a self-contained OCI artifact with multiple layers:
 
-**Rationale**: Reuses existing oras-go OCI infrastructure. Content-only policies (no wasm layer) remain valid — backward compatible. `complyctl get` already iterates manifest layers by media type; adding one more type is incremental.
+| Layer | Media Type | Purpose |
+|:---|:---|:---|
+| PaC content | `application/vnd.gemara.*.v1+yaml` | Assessment plans, control mappings, parameters — engineering-owned |
+| Wasm plugin | `application/vnd.complypack.plugin.v1+wasm` | Executable evaluation logic |
+
+The complypack config blob:
+
+```json
+{
+  "evaluator_id": "kubernetes",
+  "version": "1.0.1",
+  "capabilities": ["http_request"],
+  "wasi_target": "wasi_snapshot_preview1"
+}
+```
+
+Gemara content defines **what should be true** (standards, guidelines, catalogs). Complypacks define **how to check it** (plugin logic + technical assessment content). Different authors, different cadences, different artifacts.
+
+**Alternatives considered**:
+- Three separate streams (content, plugin, composition manifest): Over-decomposed. The Wasm plugin and its PaC assessment content are owned by the same engineering team and versioned together. Splitting them adds a composition layer without a real authorship benefit.
+- Single artifact with Gemara + plugin: Couples compliance-authored standards with engineering-authored checks. Gemara authors (GRC) and plugin authors (engineering) are different teams. A scanner bug fix shouldn't require the compliance team to republish.
+
+**Rationale**: Two streams match two author personas. The complypack bundles what the engineering team owns (plugin + PaC content) as a single versionable unit. Gemara content remains independent. `complyctl get` handles both — same oras infrastructure, distinguished by config media type.
 
 ### D5: Generate is optional, Scan carries configurations
 
@@ -110,11 +130,22 @@ Evaluator ID derived from filename:
 
 **Rationale**: Consistent with existing naming convention. No manifest files. No configuration. File presence and name encode everything.
 
-### D8: Wasm extraction during `complyctl get`
+### D8: Complypack handling during `complyctl get`
 
-**Choice**: After `oras.Copy()`, scan manifest layers. If a layer with media type `application/vnd.complypack.plugin.v1+wasm` exists, extract the blob to `~/.complytime/providers/{evaluator-id}.wasm`. Evaluator ID read from OCI config blob.
+**Choice**: When `complyctl get` encounters a complypack (detected by config media type `application/vnd.complypack.config.v1+json`):
 
-**Rationale**: Reuses existing sync infrastructure. Extraction is a post-sync hook, not a separate command. The SRE runs `complyctl get` and both content and plugin are ready.
+1. Pull the full OCI artifact (all layers) into the policy cache — same as content-only policies
+2. Read the config blob to extract `evaluator_id`
+3. Extract the Wasm layer (by media type) to `~/.complytime/providers/{evaluator-id}.wasm`
+4. PaC content layers remain in the policy cache for graph resolution at scan time
+
+When `complyctl get` encounters a standard Gemara content artifact (no complypack config), behavior is unchanged — content cached, no Wasm extraction.
+
+**Alternatives considered**:
+- Separate `complyctl get-plugin` command: Extra step for the SRE. Defeats the single-command goal.
+- Store Wasm in the policy cache only (no extraction): Discovery would need to search OCI blobs. Extracting to the providers directory keeps discovery simple — file-based, same as native plugins.
+
+**Rationale**: One pull, one cache, one extraction. The complypack is a single OCI artifact — oras pulls it in one operation. The post-sync extraction step is the only addition to the existing sync flow.
 
 ## Risks / Trade-offs
 

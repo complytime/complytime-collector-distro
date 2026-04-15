@@ -12,7 +12,7 @@
 - **THEN** no `wasm-runtime` check appears in the output
 
 ### Requirement: Complypack integrity check
-`complyctl doctor` SHALL include a `pack/{id}` check for each policy whose OCI manifest contains a Wasm layer. The check SHALL validate the full integrity chain: (1) Wasm layer exists in OCI store, (2) extracted `.wasm` file exists, (3) extracted file digest matches OCI layer descriptor, (4) module compiles in wazero, (5) module exports `describe`, `generate`, and `scan` functions.
+`complyctl doctor` SHALL include a `pack/{id}` check for each policy whose OCI manifest is a complypack (config media type `application/vnd.complypack.config.v1+json`). The check SHALL validate: (1) complypack is cached in policy store, (2) extracted `.wasm` file exists in providers directory, (3) extracted file digest matches the Wasm layer descriptor, (4) module compiles in wazero, (5) module exports `describe`, `generate`, and `scan` functions.
 
 #### Scenario: Complypack passes all integrity checks
 - **WHEN** `complyctl doctor` validates a complypack with a valid extracted Wasm module
@@ -46,14 +46,14 @@ The `provider/{id}` check SHALL report the plugin type (native or wasm) and acce
 - **THEN** the output shows "healthy (v{version}, wasm, sandboxed)"
 
 ### Requirement: Policy complypack indicator
-The `policy/{id}` check SHALL append "(complypack)" when the OCI manifest for that policy contains a Wasm layer.
+The `policy/{id}` check SHALL append "(complypack)" when the policy URL resolved to a complypack composition manifest. The indicator distinguishes policies with bundled plugin logic from content-only policies.
 
 #### Scenario: Policy is a complypack
-- **WHEN** `complyctl doctor` checks a policy that has a Wasm layer in its manifest
+- **WHEN** `complyctl doctor` checks a policy that was resolved from a complypack manifest
 - **THEN** the version output includes "(complypack)" (e.g., "v1.0.0 (latest, complypack)")
 
 #### Scenario: Policy is content-only
-- **WHEN** `complyctl doctor` checks a policy with no Wasm layer
+- **WHEN** `complyctl doctor` checks a policy pulled directly as Gemara content
 - **THEN** the version output does not include "(complypack)"
 
 ### Requirement: Verbose complypack detail

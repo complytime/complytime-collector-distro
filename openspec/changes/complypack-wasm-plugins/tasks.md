@@ -23,13 +23,13 @@
 - [ ] 3.4 Update `RouteGenerate` and `RouteScan` to pass `Configurations` and `GenerateState` when routing to Wasm plugins
 - [ ] 3.5 Write unit tests for dual-path discovery and routing
 
-## 4. Complypack Distribution (OCI Extraction)
+## 4. Complypack Distribution (Two-Stream OCI)
 
-- [ ] 4.1 Add `application/vnd.complypack.plugin.v1+wasm` and `application/vnd.complypack.config.v1+json` media type constants to `internal/complytime/consts.go`
-- [ ] 4.2 Extend `internal/cache/sync.go` to detect Wasm layer in manifest after `oras.Copy()` — if present, read evaluator ID from OCI config blob
-- [ ] 4.3 Implement Wasm layer extraction: read blob from local OCI store by descriptor digest, write to `~/.complytime/providers/{evaluator-id}.wasm`
-- [ ] 4.4 Handle update case: overwrite existing `.wasm` file when complypack digest changes
-- [ ] 4.5 Write integration test: sync a test complypack OCI artifact, verify `.wasm` extracted to correct path
+- [ ] 4.1 Add media type constants to `internal/complytime/consts.go`: `application/vnd.complypack.plugin.v1+wasm`, `application/vnd.complypack.config.v1+json`
+- [ ] 4.2 Implement complypack detection in `internal/cache/sync.go` — after `oras.Copy()`, inspect config media type to distinguish complypacks from content-only Gemara policies
+- [ ] 4.3 Implement Wasm extraction: when complypack detected, read evaluator ID from config blob, extract `.wasm` layer by media type to `~/.complytime/providers/{evaluator-id}.wasm`
+- [ ] 4.4 Handle update case: on complypack digest change, re-cache all layers and overwrite the `.wasm` file
+- [ ] 4.5 Write integration test: sync a test complypack OCI artifact containing PaC content + Wasm layer, verify content cached and `.wasm` extracted to correct path
 
 ## 5. Plugin SDK (`pkg/wasmplugin`)
 
@@ -43,9 +43,9 @@
 ## 6. Doctor Changes
 
 - [ ] 6.1 Add `wasm-runtime` check to `internal/doctor/doctor.go` — verify wazero initializes, conditional on Wasm plugins being discovered
-- [ ] 6.2 Add `pack/{id}` check — implement five-step integrity chain: layer exists → file extracted → digest matches → module compiles → exports present
+- [ ] 6.2 Add `pack/{id}` check — implement five-step integrity chain: complypack cached → file extracted → digest matches → module compiles → exports present
 - [ ] 6.3 Modify `provider/{id}` check to include plugin type (native/wasm) and access level (full host access/sandboxed) in output
-- [ ] 6.4 Modify `policy/{id}` check to append "(complypack)" when manifest contains Wasm layer
+- [ ] 6.4 Modify `policy/{id}` check to append "(complypack)" when policy was resolved from a complypack composition manifest
 - [ ] 6.5 Implement `--verbose` expansion for Wasm providers: OCI origin, full digest, size, exports, imports
 - [ ] 6.6 Implement check ordering: wasm-runtime gates Wasm provider and pack checks — skip with message on runtime failure
 - [ ] 6.7 Write unit tests for all new and modified doctor checks
@@ -61,6 +61,6 @@
 ## 8. Documentation and Authoring Guide
 
 - [ ] 8.1 Create Wasm plugin authoring guide (parallel to existing `PLUGIN_GUIDE.md`) covering SDK usage, TinyGo build, and host function API
-- [ ] 8.2 Document complypack OCI artifact structure and media type conventions
+- [ ] 8.2 Document two-stream OCI model (Gemara content vs complypacks), media type conventions, and authorship boundaries
 - [ ] 8.3 Document Generate optionality and tradeoffs (pre-flight validation, execution plan preview, freshness detection) for Wasm plugins
 - [ ] 8.4 Update `complyctl doctor` documentation with new check categories and verbose output
